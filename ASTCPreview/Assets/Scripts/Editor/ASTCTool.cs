@@ -1,4 +1,4 @@
-﻿using System.Collections;
+using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using System;
@@ -40,6 +40,13 @@ namespace ASTC
             E12x12_A,
         }
 
+        enum EDecodeMode
+        {
+            DECODE_LDR_SRGB = 0,
+            DECODE_LDR,
+            DECODE_HDR
+        };
+
         public enum ECompressQuality
         {
             QUALITY_VERYFAST = 0,
@@ -77,6 +84,8 @@ namespace ASTC
         EASTCENCODE m_encodeType = EASTCENCODE.None;
         ECompressQuality m_quality = ECompressQuality.QUALITY_MEDIUM;
         ECompressQuality m_willQuality = ECompressQuality.QUALITY_MEDIUM;
+        EDecodeMode m_willDecodeType = EDecodeMode.DECODE_LDR_SRGB;
+        EDecodeMode m_decodeType = EDecodeMode.DECODE_LDR_SRGB;
 
         private void OnEnable()
         {
@@ -163,9 +172,9 @@ namespace ASTC
 
                     m_mask = (EChanelMask)GUILayout.SelectionGrid((int)m_mask, channel_button_texts, channel_button_texts.Length, EditorStyles.toolbarButton, GUILayout.Width(180));
                     m_willEncodeType = (EASTCENCODE)EditorGUILayout.EnumPopup(m_willEncodeType, EditorStyles.toolbarPopup, GUILayout.Width(80));
+                    m_willDecodeType = (EDecodeMode)EditorGUILayout.EnumPopup(m_willDecodeType, EditorStyles.toolbarPopup, GUILayout.Width(80));
 
-
-                    if(m_willEncodeType != EASTCENCODE.None)
+                    if (m_willEncodeType != EASTCENCODE.None)
                     {
                         m_willQuality = (ECompressQuality)EditorGUILayout.EnumPopup(m_willQuality, EditorStyles.toolbarPopup, GUILayout.Width(80));
                     }
@@ -173,12 +182,18 @@ namespace ASTC
                     if (GUILayout.Button("PreView", EditorStyles.toolbarButton, GUILayout.Width(100)))
                     {
                         Texture image;
-                        if (TryRefreshEncode(m_willEncodeType, out image))
+                        if (TryRefreshEncode(m_willEncodeType, out image, m_willDecodeType, m_willQuality))
                         {
                             m_encodeType = m_willEncodeType;
                             m_quality = m_willQuality;
+                            m_decodeType = m_willDecodeType;
                             //show the astc
                             m_previewTexture = image;
+                            //储存图片
+                            var datas = (image as Texture2D).EncodeToPNG();
+                            System.IO.File.WriteAllBytes(GetSourceTextureFullPath()+"_astc.png", datas);
+                            AssetDatabase.SaveAssets();
+                            AssetDatabase.Refresh();
                         }
                     }
                 }GUILayout.EndHorizontal();
@@ -194,6 +209,7 @@ namespace ASTC
                     m_scale += Event.current.delta.y * 0.01f;
                     need_repaint = true;
                 }
+                GUILayout.Label("Scale:" + m_scale.ToString());
 
                 Color col = new Color();
                 m_mat.SetInt("_AlphaToggle", 1);
@@ -246,8 +262,9 @@ namespace ASTC
                 float y = 25 - m_scrollVec.y;
                 m_textureRect = new Rect(x, y,  content_width, content_height);
                 GUI.BeginClip(new Rect(0, 16, this.position.width, this.position.height));
-                EditorGUI.DrawPreviewTexture(m_textureRect, m_previewTexture, m_mat, ScaleMode.StretchToFill, 0, 0);
-                EditorGUI.DrawTextureAlpha(new Rect(m_textureRect.x, m_textureRect.y + m_textureRect.height + 10, m_textureRect.width, m_textureRect.height), m_previewTexture, ScaleMode.StretchToFill, 0, 0);
+                EditorGUI.DrawPreviewTexture(m_textureRect, m_sourceTexture, m_mat, ScaleMode.StretchToFill, 0, 0);
+                //EditorGUI.DrawTextureAlpha(new Rect(m_textureRect.x, m_textureRect.y + m_textureRect.height + 10, m_textureRect.width, m_textureRect.height), m_previewTexture, ScaleMode.StretchToFill, 0, 0);
+                EditorGUI.DrawPreviewTexture(new Rect(m_textureRect.x, m_textureRect.y + m_textureRect.height + 10, m_textureRect.width, m_textureRect.height), m_previewTexture, m_mat, ScaleMode.StretchToFill, 0, 0);
                 GUI.EndClip();
 
                 
@@ -292,7 +309,7 @@ namespace ASTC
                 return m_willEncodeType != m_encodeType || m_quality != m_willQuality && m_encodeType != EASTCENCODE.None;
             }
         }
-        private bool TryRefreshEncode(EASTCENCODE t, out Texture image)
+        private bool TryRefreshEncode(EASTCENCODE t, out Texture image, EDecodeMode decodeMode = EDecodeMode.DECODE_LDR_SRGB, ECompressQuality quality = ECompressQuality.QUALITY_VERYFAST)
         {
             image = null;
             if(m_sourceTexture == null || !m_previewDirty)
@@ -324,13 +341,13 @@ namespace ASTC
             if (need_pack)
             {
                 string file_path = GetSourceTextureFullPath();
-                var ptr = ASTCWrap.pack_and_unpack_image(file_path, (int)t, 0, sw_alpha, 0);
+                var ptr = ASTCWrap.pack_and_unpack_image(file_path, (int)t, (int)decodeMode, sw_alpha, (int)quality);
                 image = DecodeImageData(ptr);
             }
             return need_pack;
         }
 
-        public unsafe static Texture2D DecodeImageData(IntPtr ptr)
+        public static unsafe Texture2D DecodeImageData(IntPtr ptr)
         {
             ASTCWrap.astc_codec_image img = Marshal.PtrToStructure<ASTCWrap.astc_codec_image>(ptr);
             Texture2D tex = new Texture2D(img.xsize, img.ysize, TextureFormat.RGBA32, false);
@@ -352,4 +369,3 @@ namespace ASTC
         }
     }
 }
-
